@@ -1,0 +1,149 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============ ПОЛЬЗОВАТЕЛИ И РОЛИ ============
+
+enum Role {
+  ADMIN
+  JURY
+  REPRESENTATIVE
+  COMPOSER
+  STUDENT
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  name      String
+  role      Role     @default(STUDENT)
+  teamId    String?
+  team      Team?    @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+  
+  @@map("users")
+}
+
+// ============ ТУРНИРЫ И КОМАНДЫ ============
+
+model Tournament {
+  id          String   @id @default(uuid())
+  name        String
+  description String?  @db.Text
+  status      TournamentStatus @default(DRAFT)
+  startDate   DateTime?
+  endDate     DateTime?
+  teams       Team[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("tournaments")
+}
+
+enum TournamentStatus {
+  DRAFT
+  ACTIVE
+  FINISHED
+}
+
+model Team {
+  id           String     @id @default(uuid())
+  name         String
+  tournamentId String
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  members      User[]
+  createdAt    DateTime   @default(now())
+
+  submissions Submission[]
+  
+  @@map("teams")
+}
+
+// ============ ЗАДАЧИ ============
+
+model Task {
+  id          String   @id @default(uuid())
+  title       String
+  description String   @db.Text
+  maxPoints   Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  submissions Submission[]
+  
+  @@map("tasks")
+}
+
+// ============ ЗАГРУЗКА ФОТО И ПРОВЕРКА ============
+
+model BlankImage {
+  id            String        @id @default(uuid())
+  filePath      String
+  thumbnailPath String?
+  status        ImageStatus   @default(UPLOADED)
+  qrData        String?
+  uploadedBy    String
+  createdAt     DateTime      @default(now())
+  
+  submission    Submission?
+  
+  @@map("blank_images")
+}
+
+enum ImageStatus {
+  UPLOADED
+  PROCESSING
+  READY
+  FAILED
+  NEEDS_RESCAN
+}
+
+model Submission {
+  id          String             @id @default(uuid())
+  taskId      String
+  task        Task               @relation(fields: [taskId], references: [id])
+  teamId      String
+  team        Team               @relation(fields: [teamId], references: [id])
+  multiplier  Int                @default(1)
+  points      Int                @default(0)
+  status      SubmissionStatus   @default(PENDING_REVIEW)
+  imageId     String             @unique
+  image       BlankImage         @relation(fields: [imageId], references: [id])
+  appeal      Appeal?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  
+  @@map("submissions")
+}
+
+enum SubmissionStatus {
+  PENDING_REVIEW
+  VERIFIED
+  SCORED
+  APPEALED
+  RESOLVED
+}
+
+model Appeal {
+  id            String        @id @default(uuid())
+  submissionId  String        @unique
+  submission    Submission    @relation(fields: [submissionId], references: [id])
+  reason        String        @db.Text
+  status        AppealStatus  @default(PENDING)
+  resolvedAt    DateTime?
+  createdAt     DateTime      @default(now())
+  
+  @@map("appeals")
+}
+
+enum AppealStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
