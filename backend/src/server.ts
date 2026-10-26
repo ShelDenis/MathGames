@@ -624,6 +624,7 @@ app.get('/api/blanks/generate', async (req, res) => {
     res.status(500).json({ error: 'Ошибка генерации PDF' });
   }
 });
+
 // ==================== ЗАПУСК ====================
 
 const PORT = process.env.PORT || 3001;
