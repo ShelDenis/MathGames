@@ -283,15 +283,12 @@ app.post('/api/teams/:teamId/members/:userId', authMiddleware, requireRole('ADMI
 
 // ==================== ЗАГРУЗКА И ОБРАБОТКА ФОТО ====================
 
-// Загрузка фото бланка
 app.post('/api/upload', authMiddleware, requireRole('REPRESENTATIVE', 'ADMIN'), upload.single('image'), async (req: AuthRequest, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'Файл не загружен' });
     }
 
-    const { taskId, teamId, multiplier } = req.body;
-    
     // Создаём запись о загруженном изображении
     const blankImage = await prisma.blankImage.create({
       data: {
@@ -301,8 +298,8 @@ app.post('/api/upload', authMiddleware, requireRole('REPRESENTATIVE', 'ADMIN'), 
       },
     });
 
-    // Асинхронная обработка изображения
-    processImage(blankImage.id, req.file.path, taskId, teamId, parseInt(multiplier) || 1);
+    // Асинхронная обработка (теперь без taskId, teamId, multiplier)
+    processImage(blankImage.id, req.file.path);
 
     res.json({ 
       success: true, 
@@ -318,72 +315,85 @@ app.post('/api/upload', authMiddleware, requireRole('REPRESENTATIVE', 'ADMIN'), 
 // Функция обработки изображения
 async function processImage(
   imageId: string, 
-  filePath: string, 
-  taskId: string, 
-  teamId: string, 
-  multiplier: number
+  filePath: string
+  // Больше не передаем taskId, teamId, multiplier — они в QR!
 ) {
   try {
-    // 1. Получаем метаданные изображения (ширина, высота)
-    const metadata = await sharp(filePath).metadata();
-    const width = metadata.width || 0;
-    const height = metadata.height || 0;
-
-    // 2. Генерация превью
+    // 1. Генерация превью
     const thumbnailPath = filePath + '_thumb.jpg';
     await sharp(filePath)
       .resize(300, 300, { fit: 'cover' })
       .jpeg({ quality: 80 })
       .toFile(thumbnailPath);
 
-    // 3. Распознавание QR-кода
+    // 2. Распознавание QR-кода
     let status: 'READY' | 'NEEDS_RESCAN' = 'NEEDS_RESCAN';
     let qrData: string | null = null;
     let submission = null;
+    let recognizedData = null;
 
     try {
       // Получаем сырые пиксели в формате RGBA
       const { data, info } = await sharp(filePath)
-        .ensureAlpha() // гарантируем, что есть альфа-канал
+        .toColourspace('srgb')
+        .ensureAlpha()
         .raw()
         .toBuffer({ resolveWithObject: true });
 
-      // ВАЖНО: jsQR требует Uint8ClampedArray, а не Buffer!
       const uint8Data = new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength);
-
-      // Пытаемся распознать QR
       const code = jsQR(uint8Data, info.width, info.height);
 
       if (code && code.data) {
-        status = 'READY';
-        qrData = code.data;
-
-        console.log(`✅ QR-код успешно распознан: "${qrData}"`);
-
-        // Создаём заявку на проверку
-        submission = await prisma.submission.create({
-          data: {
+        // Пытаемся распарсить JSON
+        try {
+          const qrPayload = JSON.parse(code.data);
+          const { taskId, teamId, multiplier, basePoints, taskTitle, teamName } = qrPayload;
+          
+          recognizedData = {
             taskId,
             teamId,
+            teamName,
             multiplier,
-            status: 'PENDING_REVIEW',
-            imageId,
-          },
-          include: {
-            task: true,
-            team: true,
-          },
-        });
+            basePoints,
+            taskTitle: taskTitle || `Задача ${taskId}`
+          };
 
-        // Уведомляем жюри о новой работе
-        io.emit('new_submission', submission);
+          // Проверяем, что все обязательные поля есть
+          if (taskId && teamId && multiplier) {
+            status = 'READY';
+            qrData = code.data;
+
+            // Создаём заявку с данными из QR
+            submission = await prisma.submission.create({
+              data: {
+                taskId,
+                teamId,
+                multiplier,
+                status: 'PENDING_REVIEW',
+                imageId,
+              },
+              include: {
+                task: true,
+                team: true,
+              },
+            });
+
+            console.log(`✅ QR распознан: задача ${taskTitle}, команда ${teamId}, ×${multiplier}`);
+            
+            // Уведомляем жюри
+            io.emit('new_submission', submission);
+          } else {
+            console.warn('⚠️ В QR не хватает обязательных полей:', qrPayload);
+          }
+        } catch (parseError) {
+          console.warn('️ Не удалось распарсить JSON из QR:', code.data);
+        }
       }
     } catch (qrError) {
-      // Если QR не распознан — это НЕ ошибка, просто помечаем как NEEDS_RESCAN
       console.log('QR не распознан:', qrError instanceof Error ? qrError.message : qrError);
     }
 
-    // 4. Обновление статуса изображения
+    // 3. Обновление статуса изображения
     await prisma.blankImage.update({
       where: { id: imageId },
       data: { 
@@ -393,11 +403,12 @@ async function processImage(
       },
     });
 
-    // 5. Уведомляем клиента о результате обработки
+    // 4. Уведомляем клиента о результате обработки
     io.emit('image_processed', { 
       imageId, 
       status: status.toLowerCase(),
-      submissionId: submission?.id 
+      submissionId: submission?.id,
+      qrData: recognizedData ? JSON.stringify(recognizedData) : null
     });
 
   } catch (err) {
@@ -409,48 +420,6 @@ async function processImage(
     io.emit('image_processed', { imageId, status: 'failed' });
   }
 }
-
-// Получить очередь на проверку (для жюри)
-app.get('/api/submissions/pending', authMiddleware, requireRole('JURY', 'ADMIN'), async (req, res) => {
-  const submissions = await prisma.submission.findMany({
-    where: { status: 'PENDING_REVIEW' },
-    include: {
-      task: true,
-      team: true,
-      image: true,
-    },
-    orderBy: { createdAt: 'asc' },
-  });
-  res.json(submissions);
-});
-
-// Выставить баллы (для жюри)
-app.post('/api/submissions/:id/score', authMiddleware, requireRole('JURY', 'ADMIN'), async (req, res) => {
-  try {
-    const data = scoreSubmissionSchema.parse(req.body);
-    const submission = await prisma.submission.update({
-      where: { id: req.params.id },
-      data: { 
-        points: data.points, 
-        status: 'SCORED' 
-      },
-      include: {
-        task: true,
-        team: true,
-      },
-    });
-    
-    // Уведомляем всех о обновлении табло
-    io.emit('scoreboard_updated', submission);
-    
-    res.json(submission);
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: 'Ошибка валидации', details: error.errors });
-    }
-    res.status(500).json({ error: 'Ошибка выставления баллов' });
-  }
-});
 
 // Получить табло (для учеников)
 app.get('/api/scoreboard', async (req, res) => {
@@ -565,57 +534,92 @@ app.post('/api/appeals/:id/resolve', authMiddleware, requireRole('JURY', 'ADMIN'
   }
 });
 
-app.get('/api/blanks/generate', async (req, res) => {
-  try {
-    const { taskId, multiplier, count = 1 } = req.query;
-    if (!taskId || !multiplier) return res.status(400).json({ error: 'Нужны taskId и multiplier' });
+import PDFDocument from 'pdfkit';
+import QRCode from 'qrcode';
+import path from 'path';
 
-    const task = await prisma.task.findUnique({ where: { id: taskId as string } });
-    if (!task) return res.status(404).json({ error: 'Задача не найдена' });
+app.get('/api/blanks/generate-team', async (req, res) => {
+  try {
+    const { teamId } = req.query;
+    if (!teamId) return res.status(400).json({ error: 'Не указан teamId' });
+
+    // 1. Получаем данные команды
+    const team = await prisma.team.findUnique({ where: { id: teamId as string } });
+    if (!team) return res.status(404).json({ error: 'Команда не найдена' });
+
+    // 2. Получаем все задачи
+    const tasks = await prisma.task.findMany({ orderBy: { id: 'asc' } });
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename=blank_task_${taskId}_x${multiplier}.pdf`);
-
+    const safeName = transliterate(team.name);
+    res.setHeader('Content-Disposition', `attachment; filename=blanks_${safeName}.pdf`);
+    // 3. Создаем PDF документ (формат A6 удобен для нарезки)
+    // ВАЖНО: Убедитесь, что шрифт DejaVuSans.ttf лежит в backend/fonts/
+    const fontPath = path.join(__dirname, '../fonts/DejaVuSans.ttf');
     const doc = new PDFDocument({ 
       size: 'A6', 
-      margin: 20,
-      font: path.join(__dirname, '../fonts/DejaVuSans.ttf') //  Подключаем шрифт с кириллицей
+      margin: 15,
+      font: fontPath 
     });
+    
     doc.pipe(res);
+    doc.font(fontPath); // Применяем шрифт с кириллицей ко всему документу
 
-    // Регистрируем шрифт для всего документа
-    doc.font(path.join(__dirname, '../fonts/DejaVuSans.ttf'));
+    let isFirstPage = true;
 
-    for (let i = 0; i < Number(count); i++) {
-      if (i > 0) doc.addPage();
-      
-      // Заголовок
-      doc.fontSize(14).text(`Задача: ${task.title}`, { align: 'center' });
-      doc.moveDown(0.5);
-      
-      // Описание задачи
-      doc.fontSize(12).text(task.description, { 
-        align: 'center',
-        width: doc.page.width - 40 // Отступы по краям
-      });
-      doc.moveDown(1);
-      
-      // Множитель
-      doc.fontSize(16).fillColor('blue').text(`Множитель: ×${multiplier}`, { align: 'center' });
-      doc.moveDown(1);
-      doc.fillColor('black'); // Возвращаем чёрный цвет
+    // 4. Генерируем страницы: для каждой задачи создаем 3 варианта (×1, ×2, ×3)
+    for (const task of tasks) {
+      for (const multiplier of [1, 2, 3]) {
+        if (!isFirstPage) {
+          doc.addPage();
+        }
+        isFirstPage = false;
 
-      // Генерируем QR-код
-      const qrData = `BLANK:${taskId}:MULT:${multiplier}:TS:${Date.now()}`;
-      const qrDataUrl = await QRCode.toDataURL(qrData);
-      
-      doc.image(qrDataUrl, {
-        fit: [150, 150],
-        align: 'center',
-      });
-      
-      doc.moveDown(0.5);
-      doc.fontSize(10).text('Передайте представителю для скана', { align: 'center' });
+        // Заголовок с именем команды
+        doc.fontSize(10).fillColor('gray').text(`Команда: ${team.name}`, { align: 'center' });
+        doc.moveDown(0.2);
+
+        // Название задачи
+        doc.fontSize(14).fillColor('black').font(fontPath).text(`Задача: ${task.title}`, { align: 'center' });
+        doc.moveDown(0.3);
+        
+        // Условие задачи
+        doc.fontSize(11).text(task.description, { 
+          align: 'center',
+          width: doc.page.width - 30 
+        });
+        doc.moveDown(0.5);
+        
+        // Множитель (крупно и цветным)
+        const color = multiplier === 1 ? 'black' : (multiplier === 2 ? 'blue' : 'red');
+        doc.fontSize(18).fillColor(color).font(fontPath).text(`Множитель: ×${multiplier}`, { align: 'center' });
+        doc.moveDown(0.5);
+        doc.fillColor('black'); // Возвращаем черный цвет
+
+        // 5. Генерируем QR-код с ПОЛНЫМИ данными
+        const qrPayload = {
+          taskId: task.id,
+          teamId: team.id,
+          teamName: team.name,
+          multiplier: multiplier,
+          basePoints: task.maxPoints,
+          taskTitle: task.title
+        };
+
+        const qrDataUrl = await QRCode.toDataURL(JSON.stringify(qrPayload), {
+          width: 200,
+          margin: 1,
+          color: { dark: '#000000', light: '#ffffff' }
+        });
+        
+        doc.image(qrDataUrl, {
+          fit: [160, 160],
+          align: 'center',
+        });
+        
+        doc.moveDown(0.3);
+        doc.fontSize(9).fillColor('gray').text('Отсканируйте представителем', { align: 'center' });
+      }
     }
 
     doc.end();
@@ -625,8 +629,81 @@ app.get('/api/blanks/generate', async (req, res) => {
   }
 });
 
-// ==================== ЗАПУСК ====================
+// Получить очередь на проверку (для жюри)
+app.get('/api/submissions/pending', authMiddleware, requireRole('JURY', 'ADMIN'), async (req, res) => {
+  const submissions = await prisma.submission.findMany({
+    where: { status: 'PENDING_REVIEW' },
+    include: {
+      task: true,
+      team: true,
+      image: true,
+    },
+    orderBy: { createdAt: 'asc' },
+  });
+  res.json(submissions);
+});
 
+// Выставить баллы (для жюри)
+app.post('/api/submissions/:id/score', authMiddleware, requireRole('JURY', 'ADMIN'), async (req, res) => {
+  try {
+    const { points } = req.body;
+    const submission = await prisma.submission.update({
+      where: { id: req.params.id },
+      data: { 
+        points, 
+        status: 'SCORED' 
+      },
+      include: {
+        task: true,
+        team: true,
+      },
+    });
+    
+    // Уведомляем всех об обновлении табло
+    io.emit('scoreboard_updated', submission);
+    
+    res.json(submission);
+  } catch (error) {
+    console.error('Ошибка выставления баллов:', error);
+    res.status(500).json({ error: 'Ошибка выставления баллов' });
+  }
+});
+
+// Получить табло (для учеников)
+app.get('/api/scoreboard', async (req, res) => {
+  const submissions = await prisma.submission.findMany({
+    where: { 
+      status: {
+        in: ['SCORED', 'APPEALED', 'RESOLVED']
+      }
+    },
+    include: {
+      task: true,
+      team: true,
+      appeal: true,
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+  res.json(submissions);
+});
+
+function transliterate(text: string): string {
+  const map: Record<string, string> = {
+    'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'yo',
+    'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm',
+    'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u',
+    'ф': 'f', 'х': 'h', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'sch',
+    'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya',
+    'А': 'A', 'Б': 'B', 'В': 'V', 'Г': 'G', 'Д': 'D', 'Е': 'E', 'Ё': 'Yo',
+    'Ж': 'Zh', 'З': 'Z', 'И': 'I', 'Й': 'Y', 'К': 'K', 'Л': 'L', 'М': 'M',
+    'Н': 'N', 'О': 'O', 'П': 'P', 'Р': 'R', 'С': 'S', 'Т': 'T', 'У': 'U',
+    'Ф': 'F', 'Х': 'H', 'Ц': 'Ts', 'Ч': 'Ch', 'Ш': 'Sh', 'Щ': 'Sch',
+    'Ъ': '', 'Ы': 'Y', 'Ь': '', 'Э': 'E', 'Ю': 'Yu', 'Я': 'Ya'
+  };
+  return text.split('').map(c => map[c] || c).join('').replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+// ==================== ЗАПУСК ====================
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log(`✅ Server running on http://localhost:${PORT}`);

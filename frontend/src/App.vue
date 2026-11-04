@@ -8,6 +8,7 @@ import RepresentativeView from './views/RepresentativeView.vue'
 import JuryView from './views/JuryView.vue'
 import ScoreboardView from './views/ScoreboardView.vue'
 import AppealsView from './views/AppealsView.vue'
+import BlanksView from './views/BlanksView.vue'
 
 const auth = useAuthStore()
 const currentTab = ref('dashboard')
@@ -29,6 +30,9 @@ const availableTabs = computed(() => {
     tabs.push({ id: 'jury', label: '👨‍⚖️ Проверка' })
     tabs.push({ id: 'appeals', label: '⚖️ Апелляции' })
   }
+  if (auth.user?.role === 'ADMIN' || auth.user?.role === 'COMPOSER') {
+    tabs.push({ id: 'blanks', label: '🖨️ Печать бланков' })
+   }
   tabs.push({ id: 'scoreboard', label: '🏅 Табло' })
   return tabs
 })
@@ -73,6 +77,7 @@ const availableTabs = computed(() => {
       <JuryView v-else-if="currentTab === 'jury'" />
       <ScoreboardView v-else-if="currentTab === 'scoreboard'" />
       <AppealsView v-else-if="currentTab === 'appeals'" />
+      <BlanksView v-else-if="currentTab === 'blanks'" />
     </main>
   </div>
 </template>
