@@ -85,6 +85,7 @@ const createTaskSchema = z.object({
   title: z.string().min(1).max(200),
   description: z.string().min(1),
   maxPoints: z.number().int().positive(),
+  tournamentId: z.string().uuid().optional(),
 });
 
 const createTournamentSchema = z.object({
@@ -170,14 +171,29 @@ app.get('/api/auth/me', authMiddleware, async (req: AuthRequest, res) => {
 // ==================== ЗАДАЧИ ====================
 
 app.get('/api/tasks', async (req, res) => {
-  const tasks = await prisma.task.findMany({ orderBy: { createdAt: 'desc' } });
+  const { tournamentId } = req.query;
+  
+  const where = tournamentId ? { tournamentId: tournamentId as string } : {};
+  
+  const tasks = await prisma.task.findMany({ 
+    where,
+    include: { tournament: { select: { id: true, name: true } } },
+    orderBy: { createdAt: 'desc' } 
+  });
   res.json(tasks);
 });
 
 app.post('/api/tasks', authMiddleware, requireRole('ADMIN', 'COMPOSER'), async (req: AuthRequest, res) => {
   try {
     const data = createTaskSchema.parse(req.body);
-    const task = await prisma.task.create({ data });
+    const task = await prisma.task.create({ 
+      data: {
+        title: data.title,
+        description: data.description,
+        maxPoints: data.maxPoints,
+        tournamentId: data.tournamentId || null,
+      }
+    });
     res.status(201).json(task);
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -205,7 +221,10 @@ app.get('/api/tournaments', async (req, res) => {
 app.get('/api/tournaments/:id', async (req, res) => {
   const tournament = await prisma.tournament.findUnique({
     where: { id: req.params.id },
-    include: { teams: { include: { members: true } } },
+    include: { 
+      teams: { include: { members: true } },
+      tasks: true
+    },
   });
   if (!tournament) return res.status(404).json({ error: 'Турнир не найден' });
   res.json(tournament);
@@ -548,7 +567,15 @@ app.get('/api/blanks/generate-team', async (req, res) => {
     if (!team) return res.status(404).json({ error: 'Команда не найдена' });
 
     // 2. Получаем все задачи
-    const tasks = await prisma.task.findMany({ orderBy: { id: 'asc' } });
+    const tasks = await prisma.task.findMany({ 
+      where: { 
+        OR: [
+          { tournamentId: team.tournamentId },  // Задачи этого турнира
+          { tournamentId: null }                // + общие задачи (без турнира)
+        ]
+      },
+      orderBy: { id: 'asc' } 
+    });
 
     res.setHeader('Content-Type', 'application/pdf');
     const safeName = transliterate(team.name);
