@@ -33,15 +33,16 @@ model User {
 // ============ ТУРНИРЫ И КОМАНДЫ ============
 
 model Tournament {
-  id          String   @id @default(uuid())
+  id          String             @id @default(uuid())
   name        String
-  description String?  @db.Text
-  status      TournamentStatus @default(DRAFT)
+  description String?            @db.Text
+  status      TournamentStatus   @default(DRAFT)
   startDate   DateTime?
   endDate     DateTime?
   teams       Team[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  tasks       Task[]            
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
   
   @@map("tournaments")
 }
@@ -68,14 +69,15 @@ model Team {
 // ============ ЗАДАЧИ ============
 
 model Task {
-  id          String   @id @default(uuid())
-  title       String
-  description String   @db.Text
-  maxPoints   Int
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  submissions Submission[]
+  id           String       @id @default(uuid())
+  title        String
+  description  String       @db.Text
+  maxPoints    Int
+  tournamentId String?     
+  tournament   Tournament?  @relation(fields: [tournamentId], references: [id], onDelete: SetNull)  // ← ОБРАТНАЯ СВЯЗЬ
+  submissions  Submission[]
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
   
   @@map("tasks")
 }

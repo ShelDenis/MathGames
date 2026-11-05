@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import axios from 'axios'
 import { io, Socket } from 'socket.io-client'
 
@@ -31,15 +31,25 @@ const selectSubmission = (sub: Submission) => {
   points.value = sub.task.maxPoints * sub.multiplier
 }
 
-const scoreSubmission = async () => {
+const scoreSubmission = async (isCorrect: boolean) => {
   if (!selectedSubmission.value) return
   
-  await axios.post(`${API_URL}/submissions/${selectedSubmission.value.id}/score`, {
-    points: points.value
-  })
-  
-  selectedSubmission.value = null
-  await loadSubmissions()
+  // Если правильно — ставим максимум (баллы задачи × множитель), если нет — 0
+  const points = isCorrect 
+    ? selectedSubmission.value.task.maxPoints * selectedSubmission.value.multiplier 
+    : 0
+
+  try {
+    await axios.post(`${API_URL}/submissions/${selectedSubmission.value.id}/score`, {
+      points: points
+    })
+    
+    selectedSubmission.value = null // Сбрасываем выбор
+    await loadSubmissions() // Обновляем очередь
+  } catch (error) {
+    console.error('Ошибка выставления баллов:', error)
+    alert('Не удалось сохранить результат')
+  }
 }
 
 onMounted(() => {
@@ -93,23 +103,24 @@ onUnmounted(() => {
             <strong>Задача:</strong> {{ selectedSubmission.task.title }}<br />
             <strong>Команда:</strong> {{ selectedSubmission.team.name }}<br />
             <strong>Множитель:</strong> ×{{ selectedSubmission.multiplier }}<br />
-            <strong>Макс. баллов:</strong> {{ selectedSubmission.task.maxPoints }}
+            <strong>Макс. баллов:</strong> {{ selectedSubmission.task.maxPoints * selectedSubmission.multiplier }}
           </div>
-          <div class="mb-4">
-            <label class="block font-semibold mb-2">Баллы:</label>
-            <input
-              v-model.number="points"
-              type="number"
-              :max="selectedSubmission.task.maxPoints * selectedSubmission.multiplier"
-              class="w-full p-3 border rounded"
-            />
+
+          <!-- Новые кнопки проверки -->
+          <div class="flex gap-3 mt-6">
+            <button
+              @click="scoreSubmission(false)"
+              class="flex-1 bg-red-600 text-white py-4 rounded-lg hover:bg-red-700 font-bold text-lg transition shadow-sm"
+            >
+              ❌ Неправильно
+            </button>
+            <button
+              @click="scoreSubmission(true)"
+              class="flex-1 bg-green-600 text-white py-4 rounded-lg hover:bg-green-700 font-bold text-lg transition shadow-sm"
+            >
+              ✅ Правильно
+            </button>
           </div>
-          <button
-            @click="scoreSubmission"
-            class="w-full bg-green-600 text-white py-3 rounded hover:bg-green-700"
-          >
-            ✅ Выставить баллы
-          </button>
         </div>
       </div>
       <div v-else class="text-center text-gray-500 py-12">
