@@ -22,6 +22,7 @@ export async function processImage(imageId: string, filePath: string) {
 
     try {
       const { data, info } = await sharp(filePath)
+        .resize(1000, 1000, { fit: 'inside', withoutEnlargement: true })
         .toColourspace('srgb')
         .ensureAlpha()
         .raw()
