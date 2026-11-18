@@ -1,0 +1,16 @@
+{
+  "name": "mathgames",
+  "private": true,
+  "description": "Корневой package.json: удобный запуск всех микросервисов одной командой",
+  "scripts": {
+    "install:all": "npm --prefix services/auth install && npm --prefix services/gateway install && npm --prefix services/queue install && npm --prefix backend install",
+    "db:auth": "npm --prefix services/auth run db:generate && npm --prefix services/auth run db:push",
+    "seed:auth": "npm --prefix services/auth run seed",
+    "dev": "concurrently -k -n auth,gateway,core -c green,blue,yellow \"npm --prefix services/auth run dev\" \"npm --prefix services/gateway run dev\" \"npm --prefix backend run dev\"",
+    "queue:demo": "npm --prefix services/queue run demo",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
