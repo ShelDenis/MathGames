@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import axios from 'axios'
 
 interface Task {
@@ -13,19 +13,11 @@ const tasks = ref<Task[]>([])
 const newTask = ref({ 
   title: '', 
   description: '', 
-  maxPoints: 10 
+  maxPoints: 10,
+  tournamentId: '' 
 })
 
 const API_URL = 'http://localhost:3001/api'
-
-const loadTasks = async () => {
-  try {
-    const { data } = await axios.get(`${API_URL}/tasks`)
-    tasks.value = data
-  } catch (error) {
-    console.error('Ошибка загрузки задач:', error)
-  }
-}
 
 const createTask = async () => {
   try {
@@ -40,6 +32,33 @@ const createTask = async () => {
   }
 }
 
+interface Tournament { id: string; name: string }
+const tournaments = ref<Tournament[]>([])
+const selectedTournamentId = ref('')
+
+const loadTournaments = async () => {
+  const { data } = await axios.get(`${API_URL}/tournaments`)
+  tournaments.value = data
+}
+
+const loadTasks = async () => {
+  const url = selectedTournamentId.value 
+    ? `${API_URL}/tasks?tournamentId=${selectedTournamentId.value}`
+    : `${API_URL}/tasks`
+  const { data } = await axios.get(url)
+  tasks.value = data
+}
+
+// Следим за изменением турнира
+watch(selectedTournamentId, () => {
+  loadTasks()
+})
+
+onMounted(() => {
+  loadTournaments()
+  loadTasks()
+})
+
 // Загружаем задачи при открытии страницы
 onMounted(loadTasks)
 </script>
@@ -48,10 +67,30 @@ onMounted(loadTasks)
   <div class="p-8 max-w-4xl mx-auto font-sans">
     <h1 class="text-3xl font-bold mb-6 text-gray-800">📚 Банк задач</h1>
 
+    <div class="mb-6 p-4 bg-gray-50 rounded-lg">
+      <label class="block font-semibold mb-2">Фильтр по турниру:</label>
+      <select v-model="selectedTournamentId" class="w-full p-3 border rounded bg-white">
+        <option value="">Все задачи (без фильтра)</option>
+        <option v-for="t in tournaments" :key="t.id" :value="t.id">
+          {{ t.name }}
+        </option>
+      </select>
+    </div>
+
     <!-- Форма создания -->
     <form @submit.prevent="createTask" class="mb-8 p-6 bg-blue-50 border border-blue-200 rounded-lg shadow-sm">
       <h2 class="text-xl font-semibold mb-4 text-blue-800">Создать новую задачу</h2>
       
+      <div class="mb-3">
+        <label class="block font-semibold mb-1">Турнир (необязательно):</label>
+        <select v-model="newTask.tournamentId" class="w-full p-2 border rounded">
+          <option value="">Общая задача (без турнира)</option>
+          <option v-for="t in tournaments" :key="t.id" :value="t.id">
+            {{ t.name }}
+          </option>
+        </select>
+      </div>
+
       <input
         v-model="newTask.title"
         placeholder="Название задачи (например, 'Теорема Пифагора')"
