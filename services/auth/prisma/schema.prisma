@@ -1,0 +1,32 @@
+// Схема Auth Service: только пользователи.
+// teamId — обычная строка БЕЗ связи с Team: команды живут в Core Service
+// (в микросервисах между разными БД внешних ключей не бывает).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  JURY
+  REPRESENTATIVE
+  COMPOSER
+  STUDENT
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  name      String
+  role      Role     @default(STUDENT)
+  teamId    String?
+  createdAt DateTime @default(now())
+
+  @@map("users")
+}
