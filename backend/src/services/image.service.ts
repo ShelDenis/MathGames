@@ -61,6 +61,7 @@ export async function processImage(imageId: string, filePath: string) {
               data: {
                 taskId: blank.taskId,
                 teamId: blank.teamId,
+                tournamentId: blank.team.tournamentId,
                 multiplier: blank.multiplier,
                 status: 'PENDING_REVIEW',
                 imageId

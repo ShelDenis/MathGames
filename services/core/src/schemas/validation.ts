@@ -34,3 +34,11 @@ export const createTeamSchema = z.object({
 export const scoreSubmissionSchema = z.object({
   points: z.number().int().min(0),
 });
+
+// Ручная заявка (fallback, когда QR не распознан)
+export const createManualSubmissionSchema = z.object({
+  taskId: z.string().uuid(),
+  teamId: z.string().uuid(),
+  multiplier: z.number().int().min(1).max(10).default(1),
+  imageId: z.string().uuid().optional(), // фото бланка, если оно уже загружено
+});

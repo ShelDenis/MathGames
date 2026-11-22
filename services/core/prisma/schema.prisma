@@ -94,6 +94,7 @@ model BlankImage {
   status        ImageStatus @default(UPLOADED)
   qrData        String?
   uploadedBy    String
+  error         String?     @db.Text // причина, по которой бланк не обработан (для дашборда)
   createdAt     DateTime    @default(now())
 
   submission Submission?
@@ -115,15 +116,21 @@ model Submission {
   task       Task             @relation(fields: [taskId], references: [id])
   teamId     String
   team       Team             @relation(fields: [teamId], references: [id])
+  tournamentId String?        // денормализация: турнир команды — для фильтра очереди жюри
   multiplier Int              @default(1)
   points     Int              @default(0)
   status     SubmissionStatus @default(PENDING_REVIEW)
   imageId    String           @unique
   image      BlankImage       @relation(fields: [imageId], references: [id])
+  isManual   Boolean          @default(false) // создана вручную (fallback при нераспознанном QR)
+  createdById String?         // кто создал ручную заявку
+  judgedBy   String?          // последняя оценка — от какого судьи (для метрик скорости)
   appeal     Appeal?
   createdAt  DateTime         @default(now())
+  scoredAt   DateTime?        // когда жюри выставило оценку — для метрик скорости
   updatedAt  DateTime         @updatedAt
 
+  @@index([tournamentId, status])
   @@map("submissions")
 }
 
