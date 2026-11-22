@@ -9,6 +9,8 @@ import JuryView from './views/JuryView.vue'
 import ScoreboardView from './views/ScoreboardView.vue'
 import AppealsView from './views/AppealsView.vue'
 import BlanksView from './views/BlanksView.vue'
+import DashboardView from './views/DashboardView.vue'
+import ManualUploadView from './views/ManualUploadView.vue'
 
 const auth = useAuthStore()
 const currentTab = ref('dashboard')

@@ -90,7 +90,10 @@ onMounted(loadTasks)
           </option>
         </select>
       </div>
-
+      <div class="mb-3">
+        <label class="block font-semibold mb-1">Код задачи (например, T001):</label>
+        <input v-model="newTask.code" class="w-full p-2 border rounded font-mono" placeholder="T001" required maxlength="10" />
+      </div>
       <input
         v-model="newTask.title"
         placeholder="Название задачи (например, 'Теорема Пифагора')"
