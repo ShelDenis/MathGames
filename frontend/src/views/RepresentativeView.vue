@@ -6,6 +6,7 @@ import jsQR from 'jsqr'  // ← НОВЫЙ ИМПОРТ
 
 const API_URL = 'http://localhost:3001/api'
 let socket: Socket
+let currentImageId: string | null = null
 
 interface RecognizedData {
   taskTitle?: string
@@ -95,48 +96,96 @@ const uploadImage = async () => {
   const formData = new FormData()
   formData.append('image', selectedFile.value)
 
+  // try {
+  //   await axios.post(`${API_URL}/upload`, formData, {
+  //     headers: { 'Content-Type': 'multipart/form-data' }
+  //   })
+  //   uploadStatus.value = 'processing'
+  //   statusMessage.value = 'Обработка на сервере...'
+  // } catch (error) {
+  //   uploadStatus.value = 'error'
+  //   statusMessage.value = 'Ошибка загрузки'
+  // }
   try {
-    await axios.post(`${API_URL}/upload`, formData, {
+    const response = await axios.post(`${API_URL}/upload`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     })
+
+    currentImageId = response.data.imageId
+
     uploadStatus.value = 'processing'
     statusMessage.value = 'Обработка на сервере...'
   } catch (error) {
     uploadStatus.value = 'error'
     statusMessage.value = 'Ошибка загрузки'
+    console.error('Ошибка загрузки изображения:', error)
   }
 }
 
+// onMounted(() => {
+//   socket = io('http://localhost:3001')
+//   socket.on('image_processed', (data) => {
+//     if (data.status === 'ready') {
+//       uploadStatus.value = 'success'
+//       statusMessage.value = '✅ Готово! Работа отправлена жюри'
+//       selectedFile.value = null
+      
+//       if (data.qrData) {
+//         try {
+//           const qrPayload = JSON.parse(data.qrData)
+//           recognizedQr.value = {
+//             multiplier: qrPayload.multiplier,
+//             basePoints: qrPayload.basePoints,
+//             taskTitle: qrPayload.taskTitle || `Задача ${qrPayload.taskId}`,
+//             teamName: qrPayload.teamName || `Команда ${qrPayload.teamId}`
+//           }
+//         } catch {
+//           recognizedQr.value = null
+//         }
+//       }
+//     } else if (data.status === 'needs_rescan') {
+//       uploadStatus.value = 'error'
+//       statusMessage.value = '⚠️ QR-код не распознан сервером. Переснимите бланк.'
+//       recognizedQr.value = null
+//     } else {
+//       uploadStatus.value = 'error'
+//       statusMessage.value = '❌ Ошибка обработки'
+//       recognizedQr.value = null
+//     }
+//   })
+// })
+
 onMounted(() => {
-  socket = io('http://localhost:3001')
+  socket = io('http://localhost:3004')
+
   socket.on('image_processed', (data) => {
+    // Игнорируем события от других изображений
+    if (!currentImageId || data.imageId !== currentImageId) {
+      return
+    }
+
     if (data.status === 'ready') {
       uploadStatus.value = 'success'
       statusMessage.value = '✅ Готово! Работа отправлена жюри'
       selectedFile.value = null
-      
-      if (data.qrData) {
-        try {
-          const qrPayload = JSON.parse(data.qrData)
-          recognizedQr.value = {
-            multiplier: qrPayload.multiplier,
-            basePoints: qrPayload.basePoints,
-            taskTitle: qrPayload.taskTitle || `Задача ${qrPayload.taskId}`,
-            teamName: qrPayload.teamName || `Команда ${qrPayload.teamId}`
-          }
-        } catch {
-          recognizedQr.value = null
-        }
-      }
+      recognizedQr.value = null
     } else if (data.status === 'needs_rescan') {
       uploadStatus.value = 'error'
-      statusMessage.value = '⚠️ QR-код не распознан сервером. Переснимите бланк.'
+      statusMessage.value =
+        '⚠️ QR-код не распознан сервером. Переснимите бланк.'
       recognizedQr.value = null
     } else {
       uploadStatus.value = 'error'
       statusMessage.value = '❌ Ошибка обработки'
       recognizedQr.value = null
     }
+  })
+
+  socket.on('connect_error', (error) => {
+    console.error(
+      'Ошибка подключения к Image Worker:',
+      error.message
+    )
   })
 })
 
