@@ -4,7 +4,8 @@ import path from 'path';
 import fs from 'fs';
 import prisma from '../config/database';
 import { authMiddleware, requireRole, AuthRequest } from '../auth/auth';
-import { processImage } from '../services/image.service';
+// import { processImage } from '../services/image.service';
+import { enqueueImage } from '../services/image.queue';
 
 const router = Router();
 
@@ -55,13 +56,40 @@ router.post('/', authMiddleware, requireRole('REPRESENTATIVE', 'ADMIN'), upload.
     });
 
     // Асинхронная обработка изображения
-    processImage(blankImage.id, req.file.path);
+    // processImage(blankImage.id, req.file.path);
 
-    res.json({
+    // res.json({
+    //   success: true,
+    //   imageId: blankImage.id,
+    //   message: 'Загружено, обрабатывается'
+    // });
+
+    // Добавляем изображение в очередь обработки.
+    try {
+      await enqueueImage({
+        imageId: blankImage.id,
+        filePath: req.file.path,
+        uploadedById: req.user!.id
+      });
+    } catch (queueError) {
+      console.error('Не удалось добавить изображение в очередь:', queueError);
+
+      await prisma.blankImage.update({
+        where: { id: blankImage.id },
+        data: { status: 'FAILED' }
+      });
+
+      return res.status(503).json({
+        error: 'Очередь обработки изображений недоступна'
+      });
+    }
+
+    return res.json({
       success: true,
       imageId: blankImage.id,
-      message: 'Загружено, обрабатывается'
+      message: 'Изображение добавлено в очередь обработки'
     });
+
   } catch (error) {
     console.error('Ошибка загрузки:', error);
     res.status(500).json({ error: 'Ошибка загрузки файла' });

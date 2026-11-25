@@ -1,3 +1,4 @@
+
 import sharp from 'sharp';
 import jsQR from 'jsqr';
 import path from 'path';
@@ -8,85 +9,116 @@ export async function processImage(imageId: string, filePath: string) {
   const io = getIO();
 
   try {
-    // 1. Генерация превью
     const thumbnailPath = filePath + '_thumb.jpg';
+
+    // Создаём превью для интерфейса проверки.
     await sharp(filePath)
-      .resize(300, 300, { fit: 'cover' })
+      .resize(300, 300, { fit: 'inside', withoutEnlargement: true })
       .jpeg({ quality: 80 })
       .toFile(thumbnailPath);
 
-    // 2. Распознавание QR-кода
     let status: 'READY' | 'NEEDS_RESCAN' = 'NEEDS_RESCAN';
     let qrData: string | null = null;
-    let submission = null;
+    let submission: { id: string } | null = null;
 
     try {
+      // Уменьшаем изображение перед распознаванием QR.
       const { data, info } = await sharp(filePath)
-        .resize(1000, 1000, { fit: 'inside', withoutEnlargement: true })
+        .rotate()
+        .resize(1000, 1000, {
+          fit: 'inside',
+          withoutEnlargement: true
+        })
         .toColourspace('srgb')
         .ensureAlpha()
         .raw()
         .toBuffer({ resolveWithObject: true });
 
-      const uint8Data = new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength);
-      const code = jsQR(uint8Data, info.width, info.height);
+      const pixels = new Uint8ClampedArray(
+        data.buffer,
+        data.byteOffset,
+        data.byteLength
+      );
 
-      if (code && code.data) {
-        try {
-          const qrPayload = JSON.parse(code.data);
-          const { taskId, teamId, multiplier } = qrPayload;
+      const code = jsQR(pixels, info.width, info.height);
 
-          if (taskId && teamId && multiplier) {
-            status = 'READY';
-            qrData = code.data;
+      if (code?.data) {
+        qrData = code.data;
 
+        // Поддерживаем новый короткий формат BLANK:12345.
+        const match = /^BLANK:(\d{5})$/.exec(code.data.trim());
+
+        if (match) {
+          const blankCode = match[1];
+
+          const blank = await prisma.printedBlank.findUnique({
+            where: { code: blankCode },
+            include: { task: true, team: true }
+          });
+
+          if (blank) {
             submission = await prisma.submission.create({
               data: {
-                taskId,
-                teamId,
-                multiplier,
+                taskId: blank.taskId,
+                teamId: blank.teamId,
+                multiplier: blank.multiplier,
                 status: 'PENDING_REVIEW',
-                imageId,
+                imageId
               },
-              include: { task: true, team: true },
+              select: { id: true }
             });
 
-            console.log(`✅ QR распознан: задача ${taskId}, команда ${teamId}, ×${multiplier}`);
-            io.emit('new_submission', submission);
+            status = 'READY';
+
+            console.log(
+              `QR распознан: ${blank.code}, задача ${blank.task.code ?? blank.taskId}, команда ${blank.team.name}, ×${blank.multiplier}`
+            );
+
+            io.emit('new_submission', {
+              ...submission,
+              task: blank.task,
+              team: blank.team
+            });
+          } else {
+            console.warn(`QR-код не найден в базе: ${blankCode}`);
           }
-        } catch (parseError) {
-          console.warn('⚠️ Не удалось распарсить JSON из QR:', code.data);
+        } else {
+          console.warn('QR имеет неподдерживаемый формат:', code.data);
         }
       }
     } catch (qrError) {
-      console.log('QR не распознан:', qrError instanceof Error ? qrError.message : qrError);
+      console.error(
+        'Ошибка распознавания или сохранения результата QR:',
+        qrError instanceof Error ? qrError.message : qrError
+      );
     }
 
-    // 3. Обновление статуса изображения
     await prisma.blankImage.update({
       where: { id: imageId },
       data: {
         status,
         thumbnailPath: path.basename(thumbnailPath),
         qrData
-      },
+      }
     });
 
-    // 4. Уведомление клиента
     io.emit('image_processed', {
       imageId,
       status: status.toLowerCase(),
       submissionId: submission?.id,
-      qrData: qrData
+      qrData
     });
-
   } catch (err) {
-    // Внешний catch для критических ошибок (например, если упал sharp или БД)
     console.error('Критическая ошибка обработки изображения:', err);
+
     await prisma.blankImage.update({
       where: { id: imageId },
-      data: { status: 'FAILED' },
+      data: { status: 'FAILED' }
     });
-    io.emit('image_processed', { imageId, status: 'failed' });
+
+    io.emit('image_processed', {
+      imageId,
+      status: 'failed'
+    });
   }
 }

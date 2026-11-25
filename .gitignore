@@ -1,2 +1,13 @@
 node_modules/
 .env
+
+# Build output and local test uploads
+backend/dist/
+backend/uploads/*
+!backend/uploads/.gitkeep
+*.bak
+
+# Core Service local files
+services/core/node_modules/
+services/core/dist/
+services/core/.env

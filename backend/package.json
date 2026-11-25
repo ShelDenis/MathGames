@@ -8,9 +8,11 @@
   "description": "",
   "dependencies": {
     "bcryptjs": "^3.0.3",
+    "bullmq": "^6.7.8",
     "cors": "^2.8.6",
     "dotenv": "^18.0.8",
     "express": "^5.3.0",
+    "ioredis": "^6.0.0",
     "jsonwebtoken": "^9.0.3",
     "jsqr": "^1.4.0",
     "multer": "^2.4.0",
@@ -29,6 +31,7 @@
     "@types/multer": "^2.3.0",
     "@types/node": "^26.6.5",
     "@types/pdfkit": "^0.17.6",
+    "@types/qrcode": "^1.5.6",
     "nodemon": "^3.1.14",
     "prisma": "^5.22.0",
     "tsx": "^4.23.15",
@@ -37,6 +40,7 @@
   "scripts": {
     "dev": "nodemon --exec tsx src/server.ts",
     "build": "tsc",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "dev:worker": "nodemon --exec tsx src/image-worker.ts"
   }
 }
