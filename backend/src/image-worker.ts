@@ -2,7 +2,8 @@
 import express from 'express';
 import cors from 'cors';
 import http from 'http';
-import dotenv from 'dotenv';
+// import dotenv from 'dotenv';
+import 'dotenv/config';
 import path from 'path';
 import fs from 'fs';
 import IORedis from 'ioredis';
@@ -12,7 +13,7 @@ import { initSocket } from './config/socket';
 import { processImage } from './services/image.service';
 import uploadRoutes from './routes/upload.routes';
 
-dotenv.config();
+// dotenv.config();
 
 const app = express();
 const server = http.createServer(app);

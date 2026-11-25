@@ -107,8 +107,15 @@ const uploadImage = async () => {
   //   statusMessage.value = 'Ошибка загрузки'
   // }
   try {
+    // const response = await axios.post(`${API_URL}/upload`, formData, {
+    //   headers: { 'Content-Type': 'multipart/form-data' }
+    // })
+    const token = localStorage.getItem('token')
+
     const response = await axios.post(`${API_URL}/upload`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
+      headers: {
+        Authorization: token ? `Bearer ${token}` : ''
+      }
     })
 
     currentImageId = response.data.imageId

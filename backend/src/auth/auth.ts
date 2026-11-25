@@ -2,7 +2,12 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { Request, Response, NextFunction } from 'express';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-change-in-production';
+// const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-change-in-production';
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET) {
+  throw new Error('JWT_SECRET не задан для Image Worker');
+}
 
 // Расширяем тип Request, чтобы TypeScript знал про req.user
 export interface AuthRequest extends Request {
